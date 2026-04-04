@@ -4,6 +4,7 @@ import asyncio
 import argparse
 import json
 import os
+from datetime import datetime
 import sys
 
 from langchain_openai import ChatOpenAI
@@ -46,8 +47,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run a LangGraph multi-agent debate for deep research."
     )
-    parser.add_argument("--topic", required=True, help="Debate topic.")
-    parser.add_argument("--turns", type=int, default=3, help="Maximum debate rounds.")
+    parser.add_argument("--topic", help="Debate topic.")
+    parser.add_argument("--turns", type=int, default=2, help="Maximum debate rounds.")
     parser.add_argument(
         "--model",
         default=_first_env("DEBATE_MODEL", "OPENAI_MODEL") or "gpt-4.1",
@@ -70,6 +71,18 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=5,
         help="Number of web results to load into the debate context.",
+    )
+    parser.add_argument(
+        "--search-full",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Fetch full text for each search result and extract summaries.",
+    )
+    parser.add_argument(
+        "--search-max-chars",
+        type=int,
+        default=1200,
+        help="Max characters per fetched document when --search-full is enabled.",
     )
     parser.add_argument(
         "--base-url",
@@ -103,6 +116,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--diagram",
         default="",
         help="Write a Mermaid flowchart to the given file path and exit.",
+    )
+    parser.add_argument(
+        "--output",
+        default="",
+        help="Write debate transcript and final report to this file.",
     )
     return parser
 
@@ -177,9 +195,22 @@ def _format_api_error(exc: APIError) -> str:
     return "\n".join(lines)
 
 
+def _default_output_path() -> str:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return os.path.join("outputs", f"debate_{timestamp}.md")
+
+
+def _open_output_file(path: str):
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    return open(path, "w", encoding="utf-8")
+
+
 async def amain() -> int:
     parser = _build_parser()
     args = parser.parse_args()
+
+    if not args.diagram and not args.topic:
+        parser.error("--topic is required unless --diagram is provided.")
 
     if args.turns < 1:
         parser.error("--turns must be at least 1")
@@ -189,11 +220,6 @@ async def amain() -> int:
 
     if args.timeout <= 0:
         parser.error("--timeout must be greater than 0")
-
-    if not args.api_key:
-        parser.error(
-            "Missing API key. Set OPENAI_API_KEY in environment variables or pass --api-key."
-        )
 
     if args.diagram:
         class _NoopModel:
@@ -210,6 +236,18 @@ async def amain() -> int:
         print(f"Flowchart written to {args.diagram}")
         return 0
 
+    if not args.api_key:
+        parser.error(
+            "Missing API key. Set OPENAI_API_KEY in environment variables or pass --api-key."
+        )
+
+    output_path = args.output or _default_output_path()
+    output_handle = _open_output_file(output_path)
+
+    def _write_line(text: str) -> None:
+        output_handle.write(text + "\n")
+        output_handle.flush()
+
     try:
         model = ChatOpenAI(
             model=args.model,
@@ -223,6 +261,8 @@ async def amain() -> int:
             SearchConfig(
                 enabled=args.search,
                 max_results=args.search_results,
+                fetch_full_text=args.search_full,
+                max_chars_per_doc=args.search_max_chars,
             )
         )
         def on_update(turn: dict[str, object]) -> None:
@@ -231,11 +271,19 @@ async def amain() -> int:
             print(f"\n[{round_label}][{role}]")
             print(turn["content"])
             print()
+            _write_line(f"## [{round_label}][{role}]")
+            _write_line(str(turn["content"]))
+            _write_line("")
 
         graph = build_debate_graph(
             model=model,
             researcher=researcher,
             on_update=on_update if args.live else None,
+        )
+
+        _write_line(f"# 议题\n{args.topic}\n")
+        _write_line(
+            f"# 参数\nturns={args.turns}, search={args.search}, model={args.model}\n"
         )
 
         initial_state: DebateState = {
@@ -247,6 +295,16 @@ async def amain() -> int:
             "final_report": "",
         }
         final_state = await graph.ainvoke(initial_state)
+
+        _write_line("# 完整记录")
+        for turn in final_state["dialogue_history"]:
+            round_label = "开场" if turn["round"] == 0 else f"第 {turn['round']} 轮"
+            _write_line(f"## [{round_label}][{turn['role']}]")
+            _write_line(str(turn["content"]))
+            _write_line("")
+
+        _write_line("# 最终报告")
+        _write_line(final_state["final_report"] or "未生成最终报告。")
     except APIError as exc:
         print(
             f"{_format_api_error(exc)}\n"
@@ -257,7 +315,10 @@ async def amain() -> int:
             file=sys.stderr,
         )
         return 1
+    finally:
+        output_handle.close()
 
+    print(f"Saved transcript to {output_path}")
     _print_result(final_state)
     return 0
 
