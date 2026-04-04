@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "deep-research-debate"
+version = "0.1.0"
+description = "A LangGraph-based multi-agent debate system for deep research."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "ddgs>=9.12.1,<10.0.0",
+  "langchain-openai>=1.1.12,<2.0.0",
+  "langgraph>=1.1.6,<2.0.0",
+]
+
+[project.scripts]
+deep-research-debate = "deep_research.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/deep_research"]
