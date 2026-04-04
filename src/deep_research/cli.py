@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import argparse
+import json
 import os
 import sys
 
@@ -92,6 +93,17 @@ def _build_parser() -> argparse.ArgumentParser:
         default=_env_float("OPENAI_TIMEOUT", 60.0),
         help="Request timeout in seconds.",
     )
+    parser.add_argument(
+        "--live",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Print each turn as it is generated.",
+    )
+    parser.add_argument(
+        "--diagram",
+        default="",
+        help="Write a Mermaid flowchart to the given file path and exit.",
+    )
     return parser
 
 
@@ -116,6 +128,55 @@ def _print_result(state: DebateState) -> None:
     print(state["final_report"] or "未生成最终报告。")
 
 
+def _format_api_error(exc: APIError) -> str:
+    lines = [
+        "Model request failed.",
+        f"- error type: {exc.__class__.__name__}",
+        f"- message: {exc}",
+    ]
+
+    status_code = getattr(exc, "status_code", None)
+    if status_code is not None:
+        lines.append(f"- status code: {status_code}")
+
+    request_id = getattr(exc, "request_id", None)
+    if request_id:
+        lines.append(f"- request id: {request_id}")
+
+    if exc.code:
+        lines.append(f"- code: {exc.code}")
+    if exc.type:
+        lines.append(f"- type: {exc.type}")
+    if exc.param:
+        lines.append(f"- param: {exc.param}")
+
+    request = getattr(exc, "request", None)
+    if request is not None:
+        lines.append(f"- request method: {request.method}")
+        lines.append(f"- request url: {request.url}")
+
+    body = getattr(exc, "body", None)
+    if body is not None:
+        if isinstance(body, (dict, list)):
+            rendered_body = json.dumps(body, ensure_ascii=False, indent=2)
+        else:
+            rendered_body = str(body)
+        lines.append("- response body:")
+        lines.append(rendered_body)
+
+    cause = getattr(exc, "__cause__", None)
+    if cause is not None:
+        lines.append(f"- cause type: {cause.__class__.__name__}")
+        lines.append(f"- cause: {cause}")
+
+    notes = getattr(exc, "__notes__", None)
+    if notes:
+        lines.append("- notes:")
+        lines.extend(str(note) for note in notes)
+
+    return "\n".join(lines)
+
+
 async def amain() -> int:
     parser = _build_parser()
     args = parser.parse_args()
@@ -134,6 +195,21 @@ async def amain() -> int:
             "Missing API key. Set OPENAI_API_KEY in environment variables or pass --api-key."
         )
 
+    if args.diagram:
+        class _NoopModel:
+            async def ainvoke(self, messages: list[object]) -> object:
+                raise RuntimeError("This model should not be invoked for diagram output.")
+
+        graph = build_debate_graph(
+            model=_NoopModel(),
+            researcher=WebResearcher(SearchConfig(enabled=False)),
+        )
+        diagram = graph.get_graph().draw_mermaid()
+        with open(args.diagram, "w", encoding="utf-8") as handle:
+            handle.write(diagram)
+        print(f"Flowchart written to {args.diagram}")
+        return 0
+
     try:
         model = ChatOpenAI(
             model=args.model,
@@ -149,7 +225,18 @@ async def amain() -> int:
                 max_results=args.search_results,
             )
         )
-        graph = build_debate_graph(model=model, researcher=researcher)
+        def on_update(turn: dict[str, object]) -> None:
+            role = turn["role"]
+            round_label = "开场" if turn["round"] == 0 else f"第 {turn['round']} 轮"
+            print(f"\n[{round_label}][{role}]")
+            print(turn["content"])
+            print()
+
+        graph = build_debate_graph(
+            model=model,
+            researcher=researcher,
+            on_update=on_update if args.live else None,
+        )
 
         initial_state: DebateState = {
             "topic": args.topic,
@@ -162,11 +249,9 @@ async def amain() -> int:
         final_state = await graph.ainvoke(initial_state)
     except APIError as exc:
         print(
-            "Model request failed.\n"
-            f"- error type: {exc.__class__.__name__}\n"
-            f"- message: {exc}\n"
-            f"- base url: {args.base_url or 'default OpenAI endpoint'}\n"
-            f"- model: {args.model}\n"
+            f"{_format_api_error(exc)}\n"
+            f"- configured base url: {args.base_url or 'default OpenAI endpoint'}\n"
+            f"- configured model: {args.model}\n"
             "This is usually an upstream service issue, a custom endpoint compatibility issue, "
             "or an unsupported model name on that endpoint.",
             file=sys.stderr,

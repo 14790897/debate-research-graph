@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal, Protocol
+from typing import Any, Callable, Literal, Protocol
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
@@ -90,7 +90,11 @@ async def _call_agent(model: ChatModel, system_prompt: str, user_prompt: str) ->
 
 
 def _build_opening_message(state: DebateState) -> str:
-    search_note = "已启用外部资料检索。" if state["search_context"] else "本次未使用外部资料检索。"
+    search_note = (
+        "已启用外部资料检索。"
+        if state["search_context"]
+        else "本次未使用外部资料检索。"
+    )
     return (
         f"议题：{state['topic']}\n"
         f"规则：本场辩论共 {state['max_turns']} 轮。每轮流程为正方发言、反方反驳、裁判总结。\n"
@@ -99,18 +103,37 @@ def _build_opening_message(state: DebateState) -> str:
     )
 
 
-def build_debate_graph(model: ChatModel, researcher: WebResearcher):
-    async def research_node(state: DebateState) -> dict[str, Any]:
-        return {"search_context": await researcher.build_context_async(state["topic"])}
+def build_debate_graph(
+    model: ChatModel,
+    researcher: WebResearcher,
+    on_update: Callable[[DebateTurn], None] | None = None,
+):
+    def _emit(turn: DebateTurn) -> None:
+        if on_update is not None:
+            on_update(turn)
 
-    def moderator_opening_node(state: DebateState) -> dict[str, Any]:
-        return {
-            "dialogue_history": [
+    async def research_node(state: DebateState) -> dict[str, Any]:
+        search_context = await researcher.build_context_async(state["topic"])
+        if search_context:
+            _emit(
                 {
                     "role": "moderator",
                     "round": 0,
-                    "content": _build_opening_message(state),
+                    "content": f"外部资料检索完成。\n\n{search_context}",
                 }
+            )
+        return {"search_context": search_context}
+
+    def moderator_opening_node(state: DebateState) -> dict[str, Any]:
+        turn: DebateTurn = {
+            "role": "moderator",
+            "round": 0,
+            "content": _build_opening_message(state),
+        }
+        _emit(turn)
+        return {
+            "dialogue_history": [
+                turn
             ]
         }
 
@@ -136,15 +159,13 @@ def build_debate_graph(model: ChatModel, researcher: WebResearcher):
 - 优先给出可以被反驳和被检验的具体论证。"""
 
         content = await _call_agent(model, PROPONENT_SYSTEM_PROMPT, user_prompt)
-        return {
-            "dialogue_history": [
-                {
-                    "role": "proponent",
-                    "round": round_number,
-                    "content": content,
-                }
-            ]
+        turn: DebateTurn = {
+            "role": "proponent",
+            "round": round_number,
+            "content": content,
         }
+        _emit(turn)
+        return {"dialogue_history": [turn]}
 
     async def opponent_node(state: DebateState) -> dict[str, Any]:
         round_number = state["current_turn"] + 1
@@ -168,15 +189,13 @@ def build_debate_graph(model: ChatModel, researcher: WebResearcher):
 - 优先攻击决定结论成立与否的关键前提。"""
 
         content = await _call_agent(model, OPPONENT_SYSTEM_PROMPT, user_prompt)
-        return {
-            "dialogue_history": [
-                {
-                    "role": "opponent",
-                    "round": round_number,
-                    "content": content,
-                }
-            ]
+        turn: DebateTurn = {
+            "role": "opponent",
+            "round": round_number,
+            "content": content,
         }
+        _emit(turn)
+        return {"dialogue_history": [turn]}
 
     async def moderator_node(state: DebateState) -> dict[str, Any]:
         completed_round = state["current_turn"] + 1
@@ -230,15 +249,15 @@ def build_debate_graph(model: ChatModel, researcher: WebResearcher):
 - 下一轮关键追问："""
 
         content = await _call_agent(model, MODERATOR_SYSTEM_PROMPT, user_prompt)
+        turn: DebateTurn = {
+            "role": "moderator",
+            "round": completed_round,
+            "content": content,
+        }
+        _emit(turn)
         update: dict[str, Any] = {
             "current_turn": completed_round,
-            "dialogue_history": [
-                {
-                    "role": "moderator",
-                    "round": completed_round,
-                    "content": content,
-                }
-            ],
+            "dialogue_history": [turn],
         }
         if is_final_round:
             update["final_report"] = content
