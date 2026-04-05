@@ -7,6 +7,7 @@ import sys
 from typing import Any
 
 from openai import APIError, OpenAI
+from dotenv import load_dotenv
 
 
 def _first_env(*names: str) -> str | None:
@@ -68,6 +69,7 @@ def _format_api_error(exc: APIError) -> str:
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    load_dotenv()
     parser = argparse.ArgumentParser(
         description="Test connectivity against an OpenAI-compatible endpoint."
     )

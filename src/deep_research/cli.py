@@ -9,6 +9,7 @@ import sys
 
 from langchain_openai import ChatOpenAI
 from openai import APIError
+from dotenv import load_dotenv
 
 from deep_research.graph import build_debate_graph
 from deep_research.search import SearchConfig, WebResearcher
@@ -44,6 +45,7 @@ def _env_float(name: str, default: float) -> float:
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    load_dotenv()
     parser = argparse.ArgumentParser(
         description="Run a LangGraph multi-agent debate for deep research."
     )
