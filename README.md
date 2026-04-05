@@ -49,6 +49,7 @@ CLI 会默认读取这些环境变量，所以通常不需要再传 `--api-key` 
 ```bash
 deep-research-debate --topic "AI 是否会彻底取代初级程序员？" --turns 3 --search
 deep-research-debate --topic "是否有必要将AI和人类安全意图对齐？" --turns 3 --search
+deep-research-debate --topic '求职简历是否应该允许“美化”而不是如实陈述？' --turns 3 --search --search-full
 ```
 
 或者：

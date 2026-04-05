@@ -15,11 +15,24 @@ class SearchConfig:
     timeout: int = 15
     fetch_full_text: bool = False
     max_chars_per_doc: int = 1200
+    min_title_chars: int = 5
+    min_snippet_chars: int = 30
 
 
 class WebResearcher:
     def __init__(self, config: SearchConfig | None = None) -> None:
         self.config = config or SearchConfig()
+
+    def _is_low_quality(self, title: str, url: str, snippet: str) -> bool:
+        if not title or not url:
+            return True
+        if not (url.startswith("http://") or url.startswith("https://")):
+            return True
+        if len(title.strip()) < self.config.min_title_chars:
+            return True
+        if len(snippet.strip()) < self.config.min_snippet_chars:
+            return True
+        return False
 
     def _fetch_full_text(self, url: str) -> str:
         downloaded = trafilatura.fetch_url(url, timeout=self.config.timeout)
@@ -53,10 +66,15 @@ class WebResearcher:
             return "没有检索到可用外部资料。"
 
         blocks: list[str] = []
+        seen: set[str] = set()
         for index, item in enumerate(results, start=1):
             title = item.get("title") or "Untitled"
             url = item.get("href") or item.get("url") or ""
             snippet = item.get("body") or "无摘要"
+            key = f"{title.strip().lower()}|{url.strip().lower()}"
+            if self._is_low_quality(title, url, snippet) or key in seen:
+                continue
+            seen.add(key)
             full_text = ""
             if self.config.fetch_full_text and url:
                 try:
