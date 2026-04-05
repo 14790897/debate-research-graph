@@ -69,7 +69,8 @@ def _format_api_error(exc: APIError) -> str:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    load_dotenv()
+    load_dotenv(override=True)
+
     parser = argparse.ArgumentParser(
         description="Test connectivity against an OpenAI-compatible endpoint."
     )

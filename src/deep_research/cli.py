@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import asyncio
 import argparse
+import asyncio
 import json
 import os
-from datetime import datetime
 import sys
+from datetime import datetime
 
+from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from openai import APIError
-from dotenv import load_dotenv
 
 from deep_research.graph import build_debate_graph
 from deep_research.search import SearchConfig, WebResearcher
@@ -45,12 +45,18 @@ def _env_float(name: str, default: float) -> float:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    load_dotenv()
+    load_dotenv(override=True)
+
     parser = argparse.ArgumentParser(
         description="Run a LangGraph multi-agent debate for deep research."
     )
     parser.add_argument("--topic", help="Debate topic.")
-    parser.add_argument("--turns", type=int, default=2, help="Maximum debate rounds.")
+    parser.add_argument(
+        "--turns",
+        type=int,
+        default=int(os.getenv("DEBATE_TURNS", "2")),
+        help="Maximum debate rounds.",
+    )
     parser.add_argument(
         "--model",
         default=_first_env("DEBATE_MODEL", "OPENAI_MODEL") or "gpt-4.1",
@@ -59,37 +65,37 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--temperature",
         type=float,
-        default=0.4,
+        default=float(os.getenv("DEBATE_TEMPERATURE", "0.4")),
         help="Sampling temperature.",
     )
     parser.add_argument(
         "--search",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=os.getenv("SEARCH_ENABLED", "false").lower() == "true",
         help="Enable web research before the debate starts.",
     )
     parser.add_argument(
         "--search-results",
         type=int,
-        default=5,
+        default=int(os.getenv("SEARCH_RESULTS", "5")),
         help="Number of web results to load into the debate context.",
     )
     parser.add_argument(
         "--search-full",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=os.getenv("SEARCH_FULL", "false").lower() == "true",
         help="Fetch full text for each search result and extract summaries.",
     )
     parser.add_argument(
         "--search-ai-filter",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=os.getenv("SEARCH_AI_FILTER", "false").lower() == "true",
         help="Use the chat model to filter low-quality search results.",
     )
     parser.add_argument(
         "--search-max-chars",
         type=int,
-        default=1200,
+        default=int(os.getenv("SEARCH_MAX_CHARS", "1200")),
         help="Max characters per fetched document when --search-full is enabled.",
     )
     parser.add_argument(
