@@ -91,3 +91,7 @@ python -m deep_research.cli --topic "核聚变商业化的真实前景" --turns 
 ```bash
 python -m unittest discover -s tests -v
 ```
+
+## 流程图
+
+![Flowchart](flowchart.png)
