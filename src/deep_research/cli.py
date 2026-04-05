@@ -79,6 +79,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Fetch full text for each search result and extract summaries.",
     )
     parser.add_argument(
+        "--search-ai-filter",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Use the chat model to filter low-quality search results.",
+    )
+    parser.add_argument(
         "--search-max-chars",
         type=int,
         default=1200,
@@ -263,7 +269,10 @@ async def amain() -> int:
                 max_results=args.search_results,
                 fetch_full_text=args.search_full,
                 max_chars_per_doc=args.search_max_chars,
+                ai_filter=args.search_ai_filter,
             )
+            ,
+            model=model if args.search_ai_filter else None,
         )
         def on_update(turn: dict[str, object]) -> None:
             role = turn["role"]
