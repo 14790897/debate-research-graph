@@ -19,7 +19,7 @@
 ## 安装
 
 ```bash
-pip install .
+pip install -e .
 ```
 
 ## 环境变量

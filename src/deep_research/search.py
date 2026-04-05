@@ -157,7 +157,7 @@ class WebResearcher:
         if not self.config.enabled:
             return ""
 
-        query = f"{topic} 研究 数据 统计 证据 争议"
+        query = f"{topic}"
 
         try:
             results = await asyncio.to_thread(
